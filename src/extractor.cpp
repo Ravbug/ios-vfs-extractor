@@ -4,6 +4,7 @@
 #include <span>
 #include <unordered_map>
 #include <zlib.h>
+#include <vector>
 
 const std::vector<std::pair<std::string_view, std::string_view>> signatureToExt{
 	{"\x89PNG\r\n\x1A\n","png"},
