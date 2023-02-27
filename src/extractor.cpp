@@ -10,7 +10,8 @@ const std::vector<std::pair<std::string_view, std::string_view>> signatureToExt{
 	{"PSND","psnd"},
 	{"PFNT","pfnt"},
 	{"PMOD","pmod"},
-	{"PIFF","piff"}
+	{"PIFF","piff"},
+	{"LANG","lang"}
 };
 
 template<typename T>
@@ -110,6 +111,10 @@ void extractor::extract_to(const std::filesystem::path& inputfile, const std::fi
 		data.resize(file.size);
 		instream.read(data.data(), data.size());
 
+		auto isZipped = [](auto& data) {
+			return startsWith(data, "\x78\x9C") || startsWith(data, "\x78\xDA");
+		};
+
 		// check if the file is compressed. It is if its signature begins with PLZP
 		if (startsWith(data,"PLZP")) {
 			// decompress and swap vectors
@@ -120,11 +125,14 @@ void extractor::extract_to(const std::filesystem::path& inputfile, const std::fi
 			auto decompressed = decompress(std::span<char>{data.data() + 12, data.size() - 12});
 
 			// the data might be compressed a second time
-			if (startsWith(decompressed, "\x78\x9C") || startsWith(decompressed, "\x78\xDA")) {
+			if (isZipped(decompressed)) {
 				decompressed = std::move(decompress(decompressed));
 			}
 
 			data = std::move(decompressed);
+		}
+		else if (isZipped(data)) {
+			data = std::move(decompress(data));
 		}
 
 		// guess the file extension
