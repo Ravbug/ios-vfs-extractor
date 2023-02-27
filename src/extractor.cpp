@@ -3,11 +3,14 @@
 #include <array>
 #include <span>
 #include <unordered_map>
+#include <zlib.h>
 
 const std::vector<std::pair<std::string_view, std::string_view>> signatureToExt{
 	{"\x89PNG\r\n\x1A\n","png"},
 	{"PSND","psnd"},
-	{"PFNT","pfnt"}
+	{"PFNT","pfnt"},
+	{"PMOD","pmod"},
+	{"PIFF","piff"}
 };
 
 template<typename T>
@@ -17,7 +20,36 @@ void readBytesTo(std::istream& stream, T* dest) {
 
 bool startsWith(const std::span<char> vec, std::string_view value) {
 	return std::string_view(vec.data(), value.size()) == value;
+}
 
+std::vector<char> decompress(const std::span<char> data) {
+	z_stream zs;
+	std::memset(&zs, 0, sizeof(zs));
+	if (inflateInit(&zs) != Z_OK) {
+		throw std::runtime_error("inflateInit failed");
+	}
+	zs.next_in = (Bytef*)data.data();
+	zs.avail_in = data.size();
+
+	int ret = 0;
+	char outbuffer[32768]{ 0 };
+	std::vector<char> outData;
+	do {
+		zs.next_out = reinterpret_cast<Bytef*>(outbuffer);
+		zs.avail_out = sizeof(outbuffer);
+		ret = inflate(&zs, 0);
+		std::span<char> input{ outbuffer, zs.total_out - outData.size() };
+		if (outData.size() < zs.total_out) {
+			outData.insert(outData.end(), input.begin(),input.end());
+		}
+	} while (ret == Z_OK);
+
+	inflateEnd(&zs);
+	if (ret != Z_STREAM_END) {
+		throw std::runtime_error("Failure during decompression");
+	}
+
+	return outData;
 }
 
 std::string_view guessExt(const std::span<char> vec) {
@@ -81,6 +113,18 @@ void extractor::extract_to(const std::filesystem::path& inputfile, const std::fi
 		// check if the file is compressed. It is if its signature begins with PLZP
 		if (startsWith(data,"PLZP")) {
 			// decompress and swap vectors
+
+			auto expandedSize = *(reinterpret_cast<uint32_t*>(data.data()) + 1);
+			auto compressedSize = *(reinterpret_cast<uint32_t*>(data.data()) + 2);
+
+			auto decompressed = decompress(std::span<char>{data.data() + 12, data.size() - 12});
+
+			// the data might be compressed a second time
+			if (startsWith(decompressed, "\x78\x9C") || startsWith(decompressed, "\x78\xDA")) {
+				decompressed = std::move(decompress(decompressed));
+			}
+
+			data = std::move(decompressed);
 		}
 
 		// guess the file extension
